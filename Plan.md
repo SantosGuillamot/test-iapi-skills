@@ -140,11 +140,13 @@ No `render_callback` is needed in the PHP file. Getting these `block.json` field
   - **System message**: The skill files (SKILL.md + must-have references) — nothing else
   - **User message**: The test case's `prompt.md` — nothing else
 - No role preamble, no output format instructions — this replicates the real user experience
+- Configurable LLM parameters (`temperature`, `maxTokens`, `timeout`) with sensible defaults TBD. Retry with exponential backoff on transient errors (429, 5xx).
 - Save raw output to `results/{run-id}/{case}/generated-code.md`
 
 ### Step 4: Extraction step (`src/extract.ts`)
 
 - Make a lightweight LLM call (can use a cheap/fast model) with the raw model output
+- Configurable LLM parameters (`temperature`, `maxTokens`, `timeout`) with sensible defaults TBD. Retry with exponential backoff on transient errors (429, 5xx).
 - Prompt: "Extract the block.json, render.php, and view.js files from this response. Return them as structured JSON."
 - Expected response:
   ```json
@@ -163,6 +165,7 @@ No `render_callback` is needed in the PHP file. Getting these `block.json` field
 
 - Load the global `judge-prompt.md` as the judge system prompt
 - Assemble judge input: skill reference files (as best practices source) + case-specific `expected-patterns.yaml` + extracted code files
+- Configurable LLM parameters (`temperature`, `maxTokens`, `timeout`) with sensible defaults TBD. Retry with exponential backoff on transient errors (429, 5xx).
 - Call the judge model requesting structured JSON output:
   ```json
   {
@@ -194,18 +197,18 @@ No `render_callback` is needed in the PHP file. Getting these `block.json` field
 
 ### Step 6: Plugin scaffolding (`src/scaffold.ts`)
 
-- Copy `plugin-template/` to `results/{run-id}/{case}/plugin/`
-- Place the extracted `block.json`, `render.php`, and `view.js` into `src/blocks/eval-block/` as-is — no modifications
+- Place the extracted `block.json`, `render.php`, and `view.js` directly into `plugin-template/src/blocks/eval-block/` — this is the static path that `.wp-env.json` points to, so wp-env always sees the plugin without dynamic mounting
+- Also copy the files to `results/{run-id}/{case}/generated-files/` for archival
 
 ### Step 7: E2E step (`src/e2e.ts`)
 
 - `wp-env.ts`: Helpers to start/stop wp-env, activate plugins, create test pages via WP-CLI
 - For each test case:
-  1. Mount the scaffolded plugin into wp-env
-  2. Activate the plugin via WP-CLI
-  3. Create a test page containing the block markup via WP-CLI
+  1. Activate the plugin via WP-CLI (already mounted via the static `plugin-template/` path)
+  2. Verify activation succeeded (check `wp plugin list`) — if it failed (e.g., PHP fatal in generated code), skip E2E and record the error
+  3. Create a test page containing `<!-- wp:iapi-eval/eval-block /-->` via WP-CLI (`render.php` handles all server-side output)
   4. Run the case-specific Playwright spec
-  5. Collect pass/fail results and failure details
+  5. Collect pass/fail results and failure details (capture screenshots and traces on failure via Playwright config)
   6. Clean up (deactivate plugin, delete test page)
 - Save result to `results/{run-id}/{case}/e2e-result.json`
 
@@ -230,6 +233,7 @@ No `render_callback` is needed in the PHP file. Getting these `block.json` field
 ### Step 10: Counter test case
 
 - Write `test-cases/counter/prompt.md`: "Build a counter block with +/- buttons using the Interactivity API, with independent instances via data-wp-context"
+- Define the `expected-patterns.yaml` schema (fields like `id`, `description`, `file`, `severity`) and document it so future test case authors know what to write
 - Write `test-cases/counter/expected-patterns.yaml`: Case-specific patterns (uses data-wp-text, uses data-wp-on--click, uses getContext(), etc.)
 - Write `test-cases/counter/e2e.spec.ts`: Click +, assert count increments; click -, assert count decrements; multiple instances are independent
 - Write `judge-prompt.md`: Global system prompt instructing the judge to evaluate code against the skill references and case-specific patterns
@@ -239,6 +243,10 @@ No `render_callback` is needed in the PHP file. Getting these `block.json` field
 - Run the full pipeline manually against at least one model
 - Verify: generation produces extractable code, extraction works, judge evaluates correctly, plugin scaffolds and activates, Playwright tests pass
 - Fix any issues in the pipeline
+
+### Step 12: Local development guide
+
+- Write a guide covering: prerequisites (Node.js, Docker, API keys), setup instructions, how to run the pipeline, and how to add new test cases
 
 ## CLI usage (v1)
 
